@@ -6,6 +6,20 @@ Postgres running [pg_lake](https://github.com/Snowflake-Labs/pg_lake)** through 
 reads the provider's Parquet files directly, using short-lived storage credentials that
 Horizon vends for each table.
 
+The demo covers two ways for the provider to give a client access:
+
+| | A. Horizon IRC user | B. Open Data Sharing (recommended) |
+|---|---|---|
+| Client identity | Service user + read-only role in the provider account | `EXTERNAL CONSUMER`: restricted, no roles, can't log in to Snowflake |
+| What is exposed | Role grants on tables | `SHARE` + `EXTERNAL LISTING` with `open_sharing` |
+| Endpoint | `/polaris/api/catalog`, warehouse = database | `/polaris/open-sharing/api/catalog`, catalog = listing's catalog identifier |
+| OAuth scope | `session:role:<ROLE>` | `session:role:external` |
+| Clients in other regions | No | `REGION` on the consumer + listing auto-fulfillment |
+| Setup | `02_consumer.sql`, `postgres/01_attach.sql` | `04_open_sharing.sql`, `postgres/04_attach_open_sharing.sql` |
+
+Both use the same Iceberg tables, the same vended credentials and the same pg_lake setup.
+Only the catalog URL, scope, catalog name and PAT differ.
+
 ```
 Snowflake (provider)                         Client machine (Docker)
 ┌──────────────────────────────┐             ┌───────────────────────────────┐
@@ -28,7 +42,9 @@ Snowflake (provider)                         Client machine (Docker)
 | Local indexes, constraints | On a materialized view or native table (Index Scan, sub-ms) |
 | New rows / updates published in Snowflake | Visible on the next Postgres query, with no refresh step |
 | Column added in Snowflake | **Queries fail** ("Schema mismatch … field count 8 vs 7") until the consumer re-attaches the table |
-| Consumer can write or drop | No, HTTP 403 |
+| Consumer can write or drop | No, HTTP 403 (both paths) |
+| Open Data Sharing: pg_lake attaches the listing's catalog as an external consumer | Yes, same counts. New provider rows are visible on the next query |
+| External consumer PAT used with a provider role scope | Rejected (HTTP 400) |
 
 ## Run it
 
@@ -51,6 +67,8 @@ Step by step:
 | Query, join, local indexes/constraints | `bash scripts/psql.sh postgres/02_queries.sql` |
 | Provider publishes new data and adds a column | `snow sql -f snowflake/03_updates.sql` |
 | Consumer sees the changes | `bash scripts/psql.sh postgres/03_after_updates.sql` |
+| **Open Data Sharing:** external consumer, share, listing, PAT → `.env` | `bash scripts/create_open_sharing.sh` |
+| Attach the listing's catalog in pg_lake (replaces the Horizon-user settings) | `bash scripts/psql.sh postgres/04_attach_open_sharing.sql` |
 | Interactive psql | `bash scripts/psql.sh` |
 | Tear down | `snow sql -f snowflake/99_teardown.sql` and `docker compose -f docker/docker-compose.yml down -v` |
 
@@ -74,13 +92,23 @@ Notes:
   and shared by every database user, so it's one Snowflake identity per Postgres instance.
 - Use a hyphenated account host (`org-account-name`). Underscores in hostnames can break TLS validation.
 - The PAT sits in `postgresql.auto.conf` inside the container. Treat it like a database password.
+- For Open Data Sharing, use the values from
+  `SYSTEM$GET_LISTING_URL_FOR_EXTERNAL_CONSUMER('<listing>', '<consumer>')`: `catalog_uri` → `rest_catalog_host`,
+  `scope` → `rest_catalog_scope`, and `catalog` → each table's `catalog_name`, with `catalog_namespace = 'MARKET_DATA'`.
+  Because pg_lake has one built-in REST catalog, a Postgres instance can attach either path A or path B, not both at once.
 
 ## Talking points
 
-**Onboarding (provider):** publish datasets as Snowflake-managed Iceberg (v2). Per client,
-create a read-only role, a `TYPE = SERVICE` user, a PAT restricted to that role, and a network
-policy for the client's egress IPs. (This demo relaxes the network-policy requirement through
-an authentication policy. Don't do that in production.)
+**Onboarding (provider), Open Data Sharing:** publish datasets as Snowflake-managed Iceberg (v2)
+in a share. Per client, create an `EXTERNAL CONSUMER`, add a PAT or a workload identity (AWS, Azure,
+GCP or OIDC, so there's no secret to hand over), and add the consumer to the listing's
+`external_targets`. Then send the client the output of `SYSTEM$GET_LISTING_URL_FOR_EXTERNAL_CONSUMER`.
+The same listing can also target Snowflake accounts, and external consumers only see its Iceberg tables.
+Network policies apply in the provider's region only.
+
+**Onboarding (provider), Horizon user (path A):** a read-only role, a `TYPE = SERVICE` user, and a PAT
+restricted to that role. This demo relaxes the PAT network-policy requirement with an authentication
+policy. Don't do that in production.
 
 **Onboarding (client):** install pg_lake (no official prebuilt image yet), set five settings,
 and run one `CREATE TABLE … USING iceberg` per dataset. Columns are inferred from the catalog.
@@ -118,10 +146,10 @@ the catalog's access control. Prefer catalog-mediated reads, and use bulk Parque
 ## Layout
 
 ```
-snowflake/   01_setup.sql  02_consumer.sql  03_updates.sql  99_teardown.sql
+snowflake/   01_setup.sql  02_consumer.sql  03_updates.sql  04_open_sharing.sql  99_teardown.sql
 docker/      docker-compose.yml  scripts/entrypoint-*.sh
-postgres/    01_attach.sql  02_queries.sql  03_after_updates.sql
-scripts/     build_images.sh  create_pat.sh  psql.sh  demo.sh
+postgres/    01_attach.sql  02_queries.sql  03_after_updates.sql  04_attach_open_sharing.sql
+scripts/     build_images.sh  create_pat.sh  create_open_sharing.sh  psql.sh  demo.sh
 ```
 
 ---

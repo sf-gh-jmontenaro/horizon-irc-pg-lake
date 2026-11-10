@@ -7,7 +7,11 @@ set -a; source .env; set +a
 
 ARGS=(-v ON_ERROR_STOP=1
       -v "catalog_url=https://${SNOWFLAKE_ACCOUNT_HOST}/polaris/api/catalog"
-      -v "pat=${HORIZON_PAT}")
+      -v "pat=${HORIZON_PAT}"
+      -v "ods_catalog_uri=${ODS_CATALOG_URI:-}"
+      -v "ods_catalog=${ODS_CATALOG:-}"
+      -v "ods_scope=${ODS_SCOPE:-}"
+      -v "ods_pat=${ODS_PAT:-}")
 if [[ $# -gt 0 ]]; then
   docker exec -i irc_demo_pg_lake psql -U postgres "${ARGS[@]}" -f - < "$1"
 else

@@ -25,3 +25,9 @@ pause "6. Provider publishes new data and a schema change"
 
 pause "7. Consumer sees it on the next query"
 bash scripts/psql.sh postgres/03_after_updates.sql
+
+pause "8. Open Data Sharing: external consumer + share + listing"
+grep -q ODS_PAT .env || bash scripts/create_open_sharing.sh
+
+pause "9. Re-point pg_lake at the listing's catalog as an external consumer"
+bash scripts/psql.sh postgres/04_attach_open_sharing.sql
