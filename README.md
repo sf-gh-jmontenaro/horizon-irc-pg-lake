@@ -134,10 +134,6 @@ also freely join in their own heap tables.
 - Masking and row access policies weren't tested. Snowflake documents enforcing them for
   external engines only for specific engines (Spark), so share only data the role may see in full.
 
-**Other RDBMS (MySQL/MariaDB, SQL Server, Oracle):** not tested here. None has pg_lake-style
-Iceberg REST attach. Realistic path: keep Iceberg as the single source and turn the existing
-loader into an incremental Iceberg reader that writes into each target.
-
 **Raw file delivery:** Iceberg data files are Parquet, so raw delivery could be scoped
 read access to the same files. But raw files skip the snapshot and delete semantics, and
 the catalog's access control. Prefer catalog-mediated reads, and use bulk Parquet exports
