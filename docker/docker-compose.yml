@@ -1,0 +1,36 @@
+# Local "client" Postgres with pg_lake. Storage access comes only from
+# credentials vended by Horizon IRC, so there are no S3 secrets or LocalStack here.
+services:
+  pg_lake-postgres:
+    image: pg_lake:${PG_LAKE_REF:-v3.6.0}-pg${PG_MAJOR:-18}
+    container_name: irc_demo_pg_lake
+    ports:
+      - "127.0.0.1:5433:5432"   # 5433 avoids clashing with a local Postgres
+    volumes:
+      - ./scripts/entrypoint-postgres.sh:/entrypoint-postgres.sh:ro
+      - pgduck-unix-socket-volume:/home/postgres/pgduck_socket_dir
+      - pg-shared-tmp-dir-volume:/home/postgres/pgsql-${PG_MAJOR:-18}/data/base/pgsql_tmp
+    entrypoint: ["bash", "/entrypoint-postgres.sh"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "psql", "-U", "postgres", "-c", "select 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+    depends_on:
+      - pgduck-server
+
+  pgduck-server:
+    image: pgduck-server:${PG_LAKE_REF:-v3.6.0}-pg${PG_MAJOR:-18}
+    container_name: irc_demo_pgduck
+    volumes:
+      - ./scripts/entrypoint-pgduck-server.sh:/entrypoint-pgduck-server.sh:ro
+      - pgduck-unix-socket-volume:/home/postgres/pgduck_socket_dir
+      - pg-shared-tmp-dir-volume:/home/postgres/pgsql-${PG_MAJOR:-18}/data/base/pgsql_tmp
+    entrypoint: ["bash", "/entrypoint-pgduck-server.sh"]
+    restart: unless-stopped
+
+volumes:
+  pgduck-unix-socket-volume:
+  pg-shared-tmp-dir-volume:
